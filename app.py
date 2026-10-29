@@ -133,16 +133,15 @@ def launch_demo():
         fn=_gradio_colorize,
         inputs=gr.Image(type="pil", label="Upload a grayscale (or color) image"),
         outputs=gr.Image(type="pil", label="Colorized output"),
-        title="AI Image Colorization (Architecture Demo)",
+        title="AI Image Colorization (MS-DRCNN)",
         description=(
-            "Upload a grayscale image. The **U-Net** predicts color using the **LAB color space**.\n\n"
-            "> This demo uses **randomly initialized weights** to showcase the pipeline architecture.\n"
-            "> To get meaningful colorization, train the model on real photos using `train.py`.\n\n"
-            "- Model: 4-level U-Net encoder-decoder (31M params)\n"
-            "- Input: L channel → Output: predicted ab channels → Recombined to RGB\n"
-            "- No checkpoint loaded — weights are random"
+            "Upload a grayscale image. The **Multi-Scale Dilated Residual CNN (MS-DRCNN)** "
+            "predicts color in the **LAB color space** preserving full spatial resolution.\n\n"
+            "- Architecture: MS-DRCNN (757K params, dilations 1, 2, 4, 8)\n"
+            "- Checkpoint: Automatically loads `colorizer_custom.pth` if present\n"
+            "- Channels: L (grayscale) → predicted ab → RGB reconstruction"
         ),
-        allow_flagging="never",
+        flagging_mode="never",
         examples=[],
     )
     demo.launch(share=True)

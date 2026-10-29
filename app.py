@@ -11,6 +11,7 @@ Test inference only (no UI):
     python -c "from app import *; test_inference()"
 """
 
+import os
 import numpy as np
 import torch
 from PIL import Image
@@ -25,7 +26,7 @@ _IMAGE_SIZE = 256
 
 
 # ---------------------------------------------------------------------------
-# Model (random weights, loaded once)
+# Model (loads custom checkpoint if present, else random weights)
 # ---------------------------------------------------------------------------
 
 _model_cache: ColorizationUNet | None = None
@@ -33,8 +34,21 @@ _model_cache: ColorizationUNet | None = None
 def _get_model() -> ColorizationUNet:
     global _model_cache
     if _model_cache is None:
-        print("[APP] Initializing model with random weights ...")
         model = ColorizationUNet(base_channels=64)
+        ckpt_loaded = False
+        for ckpt_name in ["colorizer_custom.pth", "colorizer.pth"]:
+            ckpt_path = os.path.join(os.path.dirname(__file__), ckpt_name)
+            if os.path.exists(ckpt_path):
+                try:
+                    state = torch.load(ckpt_path, map_location="cpu", weights_only=True)
+                    model.load_state_dict(state)
+                    print(f"[APP] Loaded checkpoint: {ckpt_path}")
+                    ckpt_loaded = True
+                    break
+                except Exception as e:
+                    print(f"[APP] Warning loading {ckpt_path}: {e}")
+        if not ckpt_loaded:
+            print("[APP] Initializing model with random weights ...")
         model.eval()
         _model_cache = model
         print("[APP] Model ready.")
@@ -131,7 +145,7 @@ def launch_demo():
         allow_flagging="never",
         examples=[],
     )
-    demo.launch()
+    demo.launch(share=True)
 
 
 if __name__ == "__main__":

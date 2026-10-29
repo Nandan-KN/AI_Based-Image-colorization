@@ -99,9 +99,11 @@ def train_one_epoch(
         optimizer.step()
 
         running_loss += loss.item()
+        if (batch_idx + 1) % 5 == 0 or (batch_idx + 1) == len(loader):
+            print(f"    Batch [{batch_idx + 1}/{len(loader)}] | Loss: {loss.item():.4f}", flush=True)
 
     avg_loss = running_loss / len(loader)
-    print(f"  Epoch [{epoch}/{total_epochs}] | Loss: {avg_loss:.6f}")
+    print(f"  Epoch [{epoch}/{total_epochs}] | Loss: {avg_loss:.6f}", flush=True)
     return avg_loss
 
 
@@ -156,6 +158,8 @@ def main():
         # Generate synthetic images (fast, no internet required)
         generate_synthetic_images(args.data_dir, num_images=args.max_images)
         full_dataset = ColorizationDataset(args.data_dir, image_size=args.image_size)
+        if args.max_images and len(full_dataset) > args.max_images:
+            full_dataset = torch.utils.data.Subset(full_dataset, range(args.max_images))
         val_split    = max(1, int(len(full_dataset) * 0.1))
         train_size   = len(full_dataset) - val_split
         train_dataset, val_dataset = torch.utils.data.random_split(
@@ -164,7 +168,7 @@ def main():
         )
         epochs = args.epochs
         print(f"[TRAIN] Dataset: {len(full_dataset)} images "
-              f"(train={train_size}, val={val_split})")
+              f"(train={train_size}, val={val_split})", flush=True)
 
     train_loader = DataLoader(train_dataset, batch_size=args.batch_size,
                               shuffle=True,  num_workers=0)
@@ -195,7 +199,7 @@ def main():
 
         elapsed = time.time() - t0
         loss_log.append((epoch, train_loss, val_loss))
-        print(f"  Val Loss: {val_loss:.6f}  |  Elapsed: {elapsed:.1f}s")
+        print(f"  Val Loss: {val_loss:.6f}  |  Elapsed: {elapsed:.1f}s", flush=True)
 
         # Save best checkpoint
         if val_loss < best_val_loss:
@@ -208,7 +212,7 @@ def main():
     print("Training complete.")
     print(f"  Best val loss : {best_val_loss:.6f}")
     print(f"  Checkpoint    : {ckpt_path}")
-    print("=" * 60)
+    print("=" * 60, flush=True)
 
     if args.smoke_test:
         # Verify no NaN in the loss

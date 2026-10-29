@@ -1,38 +1,45 @@
 # AI Image Colorization
 
-A PyTorch implementation of automatic image colorization using a **U-Net encoder-decoder** in the **LAB color space**.  
-The model takes a grayscale **L channel** as input and predicts the **a** and **b** color channels.
+A PyTorch implementation of automatic image colorization using a **Multi-Scale Dilated Residual CNN (MS-DRCNN)** in the **LAB color space**.  
+The model takes a grayscale **L channel** as input and predicts the **a** and **b** color channels while preserving full spatial resolution end-to-end without downsampling or skip connections.
 
 ---
 
-## Architecture
+## Architecture: Multi-Scale Dilated Residual CNN (MS-DRCNN)
 
 ```
 Input (L channel, 1×H×W)
         │
-  [Encoder — 4 down-blocks]
-  64 → 128 → 256 → 512 channels, MaxPool stride 2
+   [Stem Conv] Conv2d(1 -> 64, k=3, p=1) + BatchNorm + ReLU
         │
-  [Bottleneck] 512 → 1024 channels
+   ┌────┴──────────────────────────┬──────────────────────────┬──────────────────────────┐
+   │                               │                          │                          │
+[Branch 1: d=1]             [Branch 2: d=2]            [Branch 3: d=4]            [Branch 4: d=8]
+2x ResidualBlock            2x ResidualBlock           2x ResidualBlock           2x ResidualBlock
+   │                               │                          │                          │
+   └────┬──────────────────────────┴──────────────────────────┴──────────────────────────┘
         │
-  [Decoder — 4 up-blocks]
-  ConvTranspose2d + skip connection from matching encoder
-  1024 → 512 → 256 → 128 → 64
+  [Channel Concat] (4 × 64 = 256 channels)
         │
-  [Output head] Conv1×1 → 2 channels → Tanh
+  [Fusion Conv] Conv2d(256 -> 64, k=1) + BatchNorm + ReLU
         │
-Output (ab channels, 2×H×W)
+  [Local Refinement] 2x ResidualBlock (d=1, 64 channels)
         │
-  Combine L + ab → LAB → RGB
+  [Output Head] Conv2d(64 -> 2, k=1) -> Tanh()
+        │
+Output (ab channels, 2×H×W in [-1, 1])
+        │
+  Recombine: L + ab -> LAB -> RGB
 ```
 
+### Specifications
 | Hyperparameter | Value |
 |---|---|
-| Trainable params | 31,036,546 |
-| Loss | MSE on ab channels |
+| Trainable Parameters | 757,186 (~0.76M) |
+| Spatial Resolution | 256×256 preserved end-to-end (no downsampling) |
+| Loss Function | Mean Squared Error (MSE) on ab channels |
 | Optimizer | Adam (lr=1e-3) |
-| Input size | 256×256 |
-| Normalization | L ∈ [0,1] ; ab ∈ [-1,1] |
+| Channel Ranges | L ∈ [0, 1] ; ab ∈ [-1, 1] |
 
 ---
 
@@ -40,145 +47,80 @@ Output (ab channels, 2×H×W)
 
 ```
 colorizer/
-├── dataset.py              # ColorizationDataset + LAB utilities
-├── model.py                # ColorizationUNet (U-Net)
-├── train.py                # Training loop + smoke test
-├── app.py                  # Gradio demo (upload → colorize)
+├── dataset.py              # ColorizationDataset + LAB conversion utilities
+├── model.py                # Multi-Scale Dilated Residual CNN (MS-DRCNN)
+├── train.py                # Training loop with batch logging + smoke test
+├── app.py                  # Gradio demo (loads checkpoint if present)
 ├── generate_dataset.py     # Generates synthetic training images
-├── run_demo_inference.py   # Runs inference on one image, saves to outputs/
+├── run_demo_inference.py   # Runs inference on test image -> outputs/
 ├── data/
-│   └── train/              # Training images (500 synthetic PNGs)
+│   └── train/              # Training images (generated locally)
 ├── outputs/
-│   ├── test_input_gray.png # Grayscale test input
-│   └── test_colorized.png  # Colorized model output
-└── colorizer.pth           # Best model checkpoint (~124 MB)
+│   ├── test_input_gray.png # Grayscale input image
+│   └── test_colorized.png  # Colorized output image
+├── colorizer_custom.pth    # Trained MS-DRCNN checkpoint (~3.08 MB)
+└── requirements.txt        # Pinned dependencies
 ```
 
 ---
 
 ## Setup
 
-All dependencies are standard; no extra installs needed if you have the base environment:
-
-```
-Python      3.12.10
-torch       2.14.1
-torchvision 0.29.1
-scikit-image 0.26.0
-Pillow      12.3.0
-gradio      6.29.1
-numpy       2.5.3
-```
-
-To create a fresh virtual environment:
-
 ```bash
+git clone https://github.com/Nandan-KN/AI_Based-Image-colorization.git
+cd AI_Based-Image-colorization
+
+# Create and activate virtual environment
 python -m venv .venv
 .venv\Scripts\activate       # Windows
-pip install torch torchvision scikit-image pillow gradio numpy
+# source .venv/bin/activate  # Linux/macOS
+
+# Install dependencies
+pip install -r requirements.txt
 ```
 
 ---
 
-## Verification (one command per phase)
+## Verification Gates
 
 ```bash
-# Phase 2 — Dataset
-python -c "from dataset import *; test_dataset()"
-
-# Phase 3 — Model
+# Gate 1 — Model shape, range, and parameter count
 python -c "from model import *; test_model()"
 
-# Phase 4 — Smoke test (1 epoch, synthetic data)
+# Gate 2 — Smoke test (1 epoch on synthetic data)
 python train.py --smoke-test
 
-# Phase 5 — App inference
+# Gate 3 — Inference pipeline integration
 python -c "from app import *; test_inference()"
+
+# Gate 4 — Training run
+python train.py --epochs 3 --batch-size 8 --max-images 200 --checkpoint colorizer_custom.pth
+
+# Gate 5 — End-to-end demo inference
+python run_demo_inference.py
 ```
 
 ---
 
-## Training
-
-### Quick smoke test (1 epoch, synthetic data, ~1 min)
-
-```bash
-python train.py --smoke-test
-```
-
-### Full training (5 epochs, 500 images)
-
-```bash
-python train.py --epochs 5 --batch-size 16 --max-images 500
-```
-
-The best checkpoint (lowest val loss) is saved to `colorizer.pth`.
-
-### Optional arguments
-
-| Flag | Default | Description |
-|---|---|---|
-| `--epochs` | 5 | Number of training epochs |
-| `--batch-size` | 16 | Images per batch |
-| `--image-size` | 256 | Resize images to N×N |
-| `--lr` | 1e-3 | Adam learning rate |
-| `--max-images` | 500 | Training images to generate |
-| `--checkpoint` | colorizer.pth | Output checkpoint file |
-| `--smoke-test` | — | 1 epoch, 10 samples, fast validation |
-
----
-
-## Running the Demo App
+## Running the Gradio Demo
 
 ```bash
 python app.py
 ```
 
-Opens a Gradio web UI at `http://127.0.0.1:7860`.  
-Upload a grayscale (or color) image — the model predicts and displays the colorized version.
-
-### Batch / script inference
-
-```bash
-python run_demo_inference.py
-# Saves: outputs/test_input_gray.png + outputs/test_colorized.png
-```
+Opens an interactive web app to upload grayscale images and view the predicted colorized output in real time.
 
 ---
 
-## Results (5-epoch training on 500 synthetic images, CPU)
+## Training Results
 
-### Loss curve
+Trained on 200 images for 3 epochs:
 
 | Epoch | Train Loss (MSE) | Val Loss (MSE) |
 |:---:|:---:|:---:|
-| 1 | 0.062083 | 0.092319 |
-| 2 | 0.036913 | 0.116014 |
-| 3 | 0.032109 | 0.029711 |
-| 4 | 0.027046 | 0.041982 |
-| **5** | **0.018541** | **0.018937** |
+| 1 | 0.096528 | 0.163564 |
+| 2 | 0.035569 | 0.260624 |
+| **3** | **0.028515** | **0.065218** |
 
-- Training loss decreased **70%** from epoch 1 to 5 (0.062 → 0.018).
-- Val loss converged to **0.0189** (best checkpoint saved at epoch 5).
-
-### Before / After
-
-| Input (grayscale L) | Output (colorized RGB) |
-|---|---|
-| `outputs/test_input_gray.png` | `outputs/test_colorized.png` |
-
-> **Note:** The synthetic training dataset (gradient + noise images) teaches the model the
-> LAB color mapping mechanics. For photo-realistic colorization of natural images,
-> replace `data/train/` with real photographs (e.g., Places365, ImageNet).
-
----
-
-## Extending the Project
-
-| Idea | How |
-|---|---|
-| Real dataset | Drop JPEGs into `data/train/` and re-run `train.py` |
-| More epochs | `--epochs 50` |
-| Perceptual loss | Replace MSE with LPIPS or VGG feature loss |
-| Larger U-Net | `--base-channels 128` (edit `train.py`) |
-| GPU training | Runs automatically if `torch.cuda.is_available()` |
+- **Best Val Loss:** `0.065218`
+- **Output Sample:** generated in `outputs/test_colorized.png`
